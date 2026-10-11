@@ -1,7 +1,7 @@
 # Croft Library
 
 A personal PWA for tracking authors and the books they've written, marking which you own.
-Book data comes from the [Open Library API](https://openlibrary.org/developers/api) (free, no key).
+Book data comes from the [Hardcover API](https://docs.hardcover.app/api/getting-started/) (free; you need a personal API token from hardcover.app/account/api, entered in the app under ⚙ Settings. Never commit it).
 
 - Add an author by name, pick from the matches.
 - Mark books as owned; filter All / Owned / Missing.

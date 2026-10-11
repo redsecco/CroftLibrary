@@ -1,4 +1,4 @@
-import { searchAuthors, fetchBooks } from './openlibrary.js';
+import { searchAuthors, fetchBooks, normTitle, getToken, setToken, NoTokenError } from './hardcover.js';
 import { state, save, replaceAll } from './store.js';
 
 const WEEK = 7 * 24 * 3600 * 1000;
@@ -41,17 +41,23 @@ function toast(msg) {
 // Merge freshly fetched books into an author, keeping "owned" flags.
 // Books that appear after the first fetch are flagged isNew until the author is viewed.
 function mergeBooks(author, fetched, first) {
-  const old = new Map(author.books.map(b => [b.id, b]));
+  const byId = new Map(author.books.map(b => [b.id, b]));
+  const byTitle = new Map(author.books.map(b => [normTitle(b.title), b]));
   author.books = fetched.map(b => {
-    const prev = old.get(b.id);
+    const prev = byId.get(b.id) || byTitle.get(normTitle(b.title));
     return prev
-      ? { ...prev, title: b.title, year: b.year }
+      ? { ...prev, id: b.id, title: b.title, year: b.year }
       : { ...b, owned: false, isNew: !first };
   });
   author.refreshed = Date.now();
 }
 
 async function refreshAuthor(author, first = false) {
+  if (typeof author.id !== 'number') {
+    const match = (await searchAuthors(author.name))[0];
+    if (!match) throw new Error(`No Hardcover match for ${author.name}`);
+    author.id = match.id;
+  }
   mergeBooks(author, await fetchBooks(author.id), first);
   save();
 }
@@ -59,11 +65,12 @@ async function refreshAuthor(author, first = false) {
 async function refreshStale(force = false) {
   const due = state.authors.filter(a => force || Date.now() - (a.refreshed || 0) > WEEK);
   if (!due.length) return;
-  let failed = 0;
+  if (!getToken()) { if (force) toast(errorText(new NoTokenError())); return; }
+  let failed = 0, lastErr;
   for (const a of due) {
-    try { await refreshAuthor(a); } catch { failed++; }
+    try { await refreshAuthor(a); } catch (err) { failed++; lastErr = err; }
   }
-  toast(failed ? `Refreshed with ${failed} failure(s)` : 'Books updated');
+  toast(failed ? `${failed} failed: ${errorText(lastErr)}` : 'Books updated');
   render();
 }
 
@@ -108,7 +115,16 @@ function renderSettings() {
     refresh.textContent = 'Refreshing…';
     await refreshStale(true);
   } }, 'Refresh all books now');
+  const tokenInput = h('input', { type: 'password', placeholder: 'Hardcover API token', autocomplete: 'off', value: getToken() });
+  const tokenCard = [
+    h('div', { class: 'sub', style: 'margin-bottom:8px' },
+      'Book data comes from Hardcover. Get a token at hardcover.app/account/api and paste it here. It is stored only on this device.'),
+    tokenInput,
+    h('div', { class: 'actions', style: 'margin:0 0 24px' },
+      h('button', { class: 'btn', onclick: () => { setToken(tokenInput.value); toast(getToken() ? 'Token saved' : 'Token cleared'); } }, 'Save token')),
+  ];
   view.replaceChildren(
+    ...tokenCard,
     h('div', { class: 'sub', style: 'margin-bottom:8px' }, last),
     h('div', { class: 'actions', style: 'margin:0 0 24px' }, refresh),
     h('div', { class: 'sub', style: 'margin-bottom:8px' }, 'Backup your list to a file, or restore from one.'),
@@ -116,6 +132,11 @@ function renderSettings() {
       h('button', { class: 'btn', onclick: exportData }, 'Export backup'),
       h('button', { class: 'btn', onclick: () => importer.click() }, 'Import backup'),
       importer));
+}
+
+function errorText(err) {
+  if (err instanceof NoTokenError) return 'Add your Hardcover API token in Settings first.';
+  return err instanceof TypeError ? 'Network error. Check your connection.' : err.message;
 }
 
 let searchSeq = 0;
@@ -140,14 +161,14 @@ async function runSearch(q, out) {
   out.replaceChildren(h('div', { class: 'empty' }, 'Searching…'));
   let found;
   try { found = await searchAuthors(q); }
-  catch {
-    if (seq === searchSeq) out.replaceChildren(h('div', { class: 'empty' }, 'Search failed. Check your connection.'));
+  catch (err) {
+    if (seq === searchSeq) out.replaceChildren(h('div', { class: 'empty' }, errorText(err)));
     return;
   }
   if (seq !== searchSeq) return;
   if (!found.length) return out.replaceChildren(h('div', { class: 'empty' }, 'No matches.'));
   out.replaceChildren(h('div', { class: 'card' }, found.map(a => {
-    const sub = [a.born && `b. ${a.born}`, a.workCount && `${a.workCount} works`, a.topWork && `e.g. ${a.topWork}`]
+    const sub = [a.workCount && `${a.workCount} books`, a.topWork && `e.g. ${a.topWork}`]
       .filter(Boolean).join(' · ');
     const added = state.authors.some(x => x.id === a.id);
     return h('button', { class: 'row', disabled: added, onclick: () => addAuthor(a) },
@@ -160,7 +181,7 @@ async function addAuthor(a) {
   toast(`Adding ${a.name}…`);
   const author = { id: a.id, name: a.name, books: [], refreshed: 0 };
   try { await refreshAuthor(author, true); }
-  catch { return toast('Could not fetch books. Try again.'); }
+  catch (err) { return toast(errorText(err)); }
   state.authors.push(author);
   save();
   location.hash = `#/author/${author.id}`;
@@ -208,7 +229,7 @@ function swipeToRemove(row, onRemove) {
 
 let filter = 'all';
 function renderAuthor(id) {
-  const author = state.authors.find(a => a.id === id);
+  const author = state.authors.find(a => String(a.id) === id);
   if (!author) return (location.hash = '#/');
   title.textContent = author.name;
   setBack('‹', goBack, 'Back');
@@ -216,7 +237,7 @@ function renderAuthor(id) {
   action.textContent = '↻';
   action.onclick = async () => {
     try { await refreshAuthor(author); toast('Updated'); renderAuthor(id); }
-    catch { toast('Refresh failed'); }
+    catch (err) { toast(errorText(err)); }
   };
 
   const books = visibleBooks(author);
