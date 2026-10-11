@@ -50,8 +50,9 @@ export async function searchAuthors(q) {
 const normTitle = t => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 export { normTitle };
 
-// The author's own catalogue: books they wrote, excluding other editions, compilations
-// and roles such as foreword or translator. Oldest first.
+// The author's own catalogue: books they wrote, excluding other editions, compilations,
+// roles such as foreword or translator, and books whose main edition is known to be
+// in a language other than English. Books with no language data are kept. Oldest first.
 export async function fetchBooks(authorId) {
   const data = await gql(
     `query ($id: Int!) {
@@ -66,12 +67,14 @@ export async function fetchBooks(authorId) {
          }
          order_by: { release_year: asc }
          limit: 1000
-       ) { id title release_year }
+       ) { id title release_year default_cover_edition { language { code2 } } }
      }`,
     { id: authorId });
   const seen = new Map();
   for (const b of data.books) {
     if (!b.title) continue;
+    const lang = b.default_cover_edition?.language?.code2;
+    if (lang && lang !== 'en') continue;
     const norm = normTitle(b.title);
     if (!norm || seen.has(norm)) continue;
     seen.set(norm, { id: b.id, title: b.title, year: b.release_year || null });

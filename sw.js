@@ -1,5 +1,5 @@
 // App-shell cache so the app opens offline. Bump VERSION when shipping changes.
-const VERSION = 'v3';
+const VERSION = 'v4';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'hardcover.js', 'store.js',
   'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 

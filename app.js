@@ -228,6 +228,7 @@ function swipeToRemove(row, onRemove) {
 }
 
 let filter = 'all';
+let keepRemovedOpen = false;
 function renderAuthor(id) {
   const author = state.authors.find(a => String(a.id) === id);
   if (!author) return (location.hash = '#/');
@@ -242,6 +243,8 @@ function renderAuthor(id) {
 
   const books = visibleBooks(author);
   const removed = author.books.length - books.length;
+  const reopen = keepRemovedOpen;
+  keepRemovedOpen = false;
   const newIds = new Set(books.filter(b => b.isNew).map(b => b.id));
   author.books.forEach(b => (b.isNew = false));
   save();
@@ -279,12 +282,14 @@ function renderAuthor(id) {
     h('div', { class: 'sub', style: 'margin-bottom:12px' },
       `${owned} of ${books.length} owned` + (days != null ? ` · updated ${days === 0 ? 'today' : days + 'd ago'}` : '')),
     seg, list,
+    removed ? h('details', { class: 'removed', open: reopen },
+      h('summary', {}, `Removed (${removed})`),
+      h('div', { class: 'card' }, author.books.filter(b => b.hidden)
+        .sort((a, b) => a.title.localeCompare(b.title))
+        .map(b => h('div', { class: 'row' },
+          h('div', { class: 'grow' }, h('div', { class: 't' }, b.title), h('div', { class: 'sub' }, b.year ?? '')),
+          h('button', { class: 'btn', onclick: () => { b.hidden = false; save(); keepRemovedOpen = true; renderAuthor(id); } }, 'Restore'))))) : null,
     h('div', { class: 'actions' },
-      removed ? h('button', { class: 'btn', onclick: () => {
-        author.books.forEach(b => (b.hidden = false));
-        save();
-        renderAuthor(id);
-      } }, `Restore ${removed} removed`) : null,
       h('button', { class: 'btn danger', onclick: () => {
       if (confirm(`Remove ${author.name} and their ownership records?`)) {
         state.authors = state.authors.filter(a => a !== author); save(); location.hash = '#/';

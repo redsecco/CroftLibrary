@@ -45,3 +45,6 @@ input[type=search], input[type=text] {
 .swipe-label { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); color: #fff; font-weight: 600; }
 .swipe > .row { position: relative; background: var(--card); }
 .swipe > .row + .row { border-top: 0; }
+details.removed { margin-top: 20px; }
+details.removed summary { color: var(--muted); padding: 8px 2px; cursor: pointer; }
+details.removed .row .t { color: var(--muted); }
