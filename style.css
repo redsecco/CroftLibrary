@@ -40,3 +40,8 @@ input[type=search], input[type=text] {
 #toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translate(-50%, 20px); opacity: 0;
   background: #222; color: #fff; padding: 10px 16px; border-radius: 20px; font-size: 14px; transition: .25s; pointer-events: none; max-width: 90%; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
+.swipe { position: relative; background: #c0392b; overflow: hidden; touch-action: pan-y; }
+.swipe + .swipe { border-top: 1px solid var(--line); }
+.swipe-label { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); color: #fff; font-weight: 600; }
+.swipe > .row { position: relative; background: var(--card); }
+.swipe > .row + .row { border-top: 0; }

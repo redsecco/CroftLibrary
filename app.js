@@ -25,6 +25,8 @@ function setBack(text, fn, label) {
 }
 const goBack = () => (history.length > 1 ? history.back() : (location.hash = '#/'));
 
+const visibleBooks = a => a.books.filter(b => !b.hidden);
+
 let toastTimer;
 function toast(msg) {
   const t = $('toast');
@@ -80,12 +82,13 @@ function renderList() {
   }
   const authors = [...state.authors].sort((a, b) => a.name.localeCompare(b.name));
   const card = h('div', { class: 'card' }, authors.map(a => {
-    const owned = a.books.filter(b => b.owned).length;
-    const fresh = a.books.filter(b => b.isNew).length;
+    const books = visibleBooks(a);
+    const owned = books.filter(b => b.owned).length;
+    const fresh = books.filter(b => b.isNew).length;
     return h('button', { class: 'row', onclick: () => (location.hash = `#/author/${a.id}`) },
       h('div', { class: 'grow' }, h('div', { class: 'name' }, a.name)),
       fresh ? h('span', { class: 'badge' }, `${fresh} new`) : null,
-      h('span', { class: 'count' }, `${owned}/${a.books.length}`));
+      h('span', { class: 'count' }, `${owned}/${books.length}`));
   }));
 
   view.replaceChildren(card);
@@ -163,6 +166,46 @@ async function addAuthor(a) {
   location.hash = `#/author/${author.id}`;
 }
 
+// Wraps a row so that swiping it left past a threshold calls onRemove.
+function swipeToRemove(row, onRemove) {
+  const wrap = h('div', { class: 'swipe' }, h('span', { class: 'swipe-label' }, 'Remove'), row);
+  const THRESHOLD = 110;
+  let x0 = 0, y0 = 0, dx = 0, tracking = false, moved = false;
+
+  wrap.addEventListener('touchstart', e => {
+    const t = e.touches[0];
+    x0 = t.clientX; y0 = t.clientY; dx = 0; tracking = true; moved = false;
+    row.style.transition = 'none';
+  }, { passive: true });
+
+  wrap.addEventListener('touchmove', e => {
+    if (!tracking) return;
+    const t = e.touches[0];
+    dx = Math.min(0, t.clientX - x0);
+    if (!moved && Math.abs(t.clientY - y0) > Math.abs(t.clientX - x0)) { tracking = false; row.style.transform = ''; return; }
+    if (Math.abs(dx) > 8) moved = true;
+    row.style.transform = `translateX(${dx}px)`;
+  }, { passive: true });
+
+  const end = () => {
+    if (!tracking) return;
+    tracking = false;
+    row.style.transition = 'transform .2s';
+    if (dx < -THRESHOLD) {
+      row.style.transform = 'translateX(-110%)';
+      setTimeout(onRemove, 180);
+    } else {
+      row.style.transform = '';
+    }
+  };
+  wrap.addEventListener('touchend', end);
+  wrap.addEventListener('touchcancel', end);
+
+  // A swipe must not also toggle the checkbox.
+  wrap.addEventListener('click', e => { if (moved) { e.preventDefault(); e.stopPropagation(); moved = false; } }, true);
+  return wrap;
+}
+
 let filter = 'all';
 function renderAuthor(id) {
   const author = state.authors.find(a => a.id === id);
@@ -176,7 +219,9 @@ function renderAuthor(id) {
     catch { toast('Refresh failed'); }
   };
 
-  const newIds = new Set(author.books.filter(b => b.isNew).map(b => b.id));
+  const books = visibleBooks(author);
+  const removed = author.books.length - books.length;
+  const newIds = new Set(books.filter(b => b.isNew).map(b => b.id));
   author.books.forEach(b => (b.isNew = false));
   save();
 
@@ -184,7 +229,7 @@ function renderAuthor(id) {
     h('button', { class: f === filter ? 'on' : '', onclick: () => { filter = f; renderAuthor(id); } },
       f[0].toUpperCase() + f.slice(1))));
 
-  const shown = author.books
+  const shown = books
     .filter(b => filter === 'all' || (filter === 'owned') === b.owned)
     .sort((a, b) => (a.year ?? 9999) - (b.year ?? 9999) || a.title.localeCompare(b.title));
 
@@ -198,17 +243,28 @@ function renderAuthor(id) {
           box,
           h('div', { class: 'grow' }, h('div', { class: 't' }, b.title), h('div', { class: 'sub' }, b.year ?? '')),
           newIds.has(b.id) ? h('span', { class: 'badge' }, 'new') : null);
-        return row;
+        return swipeToRemove(row, () => {
+          b.hidden = true;
+          save();
+          toast(`Removed ${b.title}`);
+          renderAuthor(id);
+        });
       }))
     : h('div', { class: 'empty' }, 'Nothing to show.');
 
-  const owned = author.books.filter(b => b.owned).length;
+  const owned = books.filter(b => b.owned).length;
   const days = author.refreshed ? Math.floor((Date.now() - author.refreshed) / 86400000) : null;
   view.replaceChildren(
     h('div', { class: 'sub', style: 'margin-bottom:12px' },
-      `${owned} of ${author.books.length} owned` + (days != null ? ` · updated ${days === 0 ? 'today' : days + 'd ago'}` : '')),
+      `${owned} of ${books.length} owned` + (days != null ? ` · updated ${days === 0 ? 'today' : days + 'd ago'}` : '')),
     seg, list,
-    h('div', { class: 'actions' }, h('button', { class: 'btn danger', onclick: () => {
+    h('div', { class: 'actions' },
+      removed ? h('button', { class: 'btn', onclick: () => {
+        author.books.forEach(b => (b.hidden = false));
+        save();
+        renderAuthor(id);
+      } }, `Restore ${removed} removed`) : null,
+      h('button', { class: 'btn danger', onclick: () => {
       if (confirm(`Remove ${author.name} and their ownership records?`)) {
         state.authors = state.authors.filter(a => a !== author); save(); location.hash = '#/';
       }
